@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { DiffResult, DiffRow, RowKind } from "../lib/types";
+import type { DiffResult, DiffRow, InlineSpan, RowKind } from "../lib/types";
 import type { ViewMode } from "./Toolbar";
 
 const ROW_HEIGHT = 22;
@@ -24,16 +24,57 @@ function kindClass(kind: RowKind): string {
   }
 }
 
+function CodeLine({
+  text,
+  spans,
+  mark,
+}: {
+  text: string | null;
+  spans: InlineSpan[] | null | undefined;
+  mark: "del" | "ins" | null;
+}) {
+  if (spans && spans.length > 0) {
+    return (
+      <pre className="code">
+        {spans.map((span, i) => (
+          <span
+            key={i}
+            className={
+              span.changed
+                ? mark === "ins"
+                  ? "inline-ins"
+                  : "inline-del"
+                : undefined
+            }
+          >
+            {span.text}
+          </span>
+        ))}
+      </pre>
+    );
+  }
+
+  return <pre className="code">{text ?? ""}</pre>;
+}
+
 function SideBySideRow({ row }: { row: DiffRow }) {
   return (
     <div className={`diff-row side ${kindClass(row.kind)}`}>
       <div className="pane left">
         <span className="gutter">{row.left_no ?? ""}</span>
-        <pre className="code">{row.left_text ?? ""}</pre>
+        <CodeLine
+          text={row.left_text}
+          spans={row.left_spans}
+          mark={row.kind === "replace" || row.kind === "delete" ? "del" : null}
+        />
       </div>
       <div className="pane right">
         <span className="gutter">{row.right_no ?? ""}</span>
-        <pre className="code">{row.right_text ?? ""}</pre>
+        <CodeLine
+          text={row.right_text}
+          spans={row.right_spans}
+          mark={row.kind === "replace" || row.kind === "insert" ? "ins" : null}
+        />
       </div>
     </div>
   );
@@ -46,7 +87,7 @@ function UnifiedRow({ row }: { row: DiffRow }) {
         <span className="gutter">{row.left_no ?? ""}</span>
         <span className="gutter">{row.right_no ?? ""}</span>
         <span className="marker"> </span>
-        <pre className="code">{row.left_text ?? ""}</pre>
+        <CodeLine text={row.left_text} spans={null} mark={null} />
       </div>
     );
   }
@@ -54,18 +95,22 @@ function UnifiedRow({ row }: { row: DiffRow }) {
   if (row.kind === "delete" || (row.kind === "replace" && row.left_text != null)) {
     return (
       <>
-        <div className={`diff-row unified row-delete`}>
+        <div className="diff-row unified row-delete">
           <span className="gutter">{row.left_no ?? ""}</span>
           <span className="gutter" />
           <span className="marker">−</span>
-          <pre className="code">{row.left_text ?? ""}</pre>
+          <CodeLine
+            text={row.left_text}
+            spans={row.kind === "replace" ? row.left_spans : null}
+            mark="del"
+          />
         </div>
         {row.kind === "replace" && row.right_text != null ? (
-          <div className={`diff-row unified row-insert`}>
+          <div className="diff-row unified row-insert">
             <span className="gutter" />
             <span className="gutter">{row.right_no ?? ""}</span>
             <span className="marker">+</span>
-            <pre className="code">{row.right_text ?? ""}</pre>
+            <CodeLine text={row.right_text} spans={row.right_spans} mark="ins" />
           </div>
         ) : null}
       </>
@@ -73,11 +118,11 @@ function UnifiedRow({ row }: { row: DiffRow }) {
   }
 
   return (
-    <div className={`diff-row unified row-insert`}>
+    <div className="diff-row unified row-insert">
       <span className="gutter" />
       <span className="gutter">{row.right_no ?? ""}</span>
       <span className="marker">+</span>
-      <pre className="code">{row.right_text ?? ""}</pre>
+      <CodeLine text={row.right_text} spans={null} mark="ins" />
     </div>
   );
 }
@@ -86,8 +131,6 @@ export function DiffView({ result, viewMode, focusRowIndex }: DiffViewProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const rows = result.rows;
 
-  // Unified replace rows expand to 2 visual lines — approximate with fixed height
-  // for virtualization; replace still uses one virtual index (side-by-side).
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
