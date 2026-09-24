@@ -1,11 +1,18 @@
 export type RowKind = "equal" | "insert" | "delete" | "replace";
 
+export interface InlineSpan {
+  text: string;
+  changed: boolean;
+}
+
 export interface DiffRow {
   kind: RowKind;
   left_no: number | null;
   right_no: number | null;
   left_text: string | null;
   right_text: string | null;
+  left_spans: InlineSpan[] | null;
+  right_spans: InlineSpan[] | null;
 }
 
 export interface DiffStats {

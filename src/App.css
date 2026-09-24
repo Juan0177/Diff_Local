@@ -416,7 +416,23 @@ kbd {
 }
 
 .row-replace .code {
-  color: var(--replace);
+  color: #2a3648;
+}
+
+.inline-del {
+  background: rgba(163, 59, 59, 0.32);
+  color: var(--delete);
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.inline-ins {
+  background: rgba(15, 107, 70, 0.28);
+  color: var(--insert);
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .side.row-insert .pane.left,

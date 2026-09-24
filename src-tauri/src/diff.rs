@@ -18,12 +18,22 @@ pub enum RowKind {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct InlineSpan {
+    pub text: String,
+    /// True when this fragment differs between left and right.
+    pub changed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct DiffRow {
     pub kind: RowKind,
     pub left_no: Option<u32>,
     pub right_no: Option<u32>,
     pub left_text: Option<String>,
     pub right_text: Option<String>,
+    /// Word/char-level spans for in-line highlight (replace rows with both sides).
+    pub left_spans: Option<Vec<InlineSpan>>,
+    pub right_spans: Option<Vec<InlineSpan>>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -85,6 +95,106 @@ fn strip_cr(line: &str) -> &str {
     line.strip_suffix('\r').unwrap_or(line)
 }
 
+/// Word-level when whitespace is present, otherwise character-level.
+fn compute_inline_spans(old: &str, new: &str) -> (Vec<InlineSpan>, Vec<InlineSpan>) {
+    use similar::ChangeTag;
+
+    let use_words = old.chars().any(char::is_whitespace)
+        || new.chars().any(char::is_whitespace);
+
+    let mut left: Vec<InlineSpan> = Vec::new();
+    let mut right: Vec<InlineSpan> = Vec::new();
+
+    // TextDiff::from_words / from_chars borrow the inputs for the lifetime of the diff.
+    if use_words {
+        let diff = TextDiff::from_words(old, new);
+        for change in diff.iter_all_changes() {
+            let text = change.value().to_string();
+            match change.tag() {
+                ChangeTag::Equal => {
+                    left.push(InlineSpan {
+                        text: text.clone(),
+                        changed: false,
+                    });
+                    right.push(InlineSpan {
+                        text,
+                        changed: false,
+                    });
+                }
+                ChangeTag::Delete => {
+                    left.push(InlineSpan {
+                        text,
+                        changed: true,
+                    });
+                }
+                ChangeTag::Insert => {
+                    right.push(InlineSpan {
+                        text,
+                        changed: true,
+                    });
+                }
+            }
+        }
+    } else {
+        let diff = TextDiff::from_chars(old, new);
+        for change in diff.iter_all_changes() {
+            let text = change.value().to_string();
+            match change.tag() {
+                ChangeTag::Equal => {
+                    left.push(InlineSpan {
+                        text: text.clone(),
+                        changed: false,
+                    });
+                    right.push(InlineSpan {
+                        text,
+                        changed: false,
+                    });
+                }
+                ChangeTag::Delete => {
+                    left.push(InlineSpan {
+                        text,
+                        changed: true,
+                    });
+                }
+                ChangeTag::Insert => {
+                    right.push(InlineSpan {
+                        text,
+                        changed: true,
+                    });
+                }
+            }
+        }
+    }
+
+    (left, right)
+}
+
+fn row(
+    kind: RowKind,
+    left_no: Option<u32>,
+    right_no: Option<u32>,
+    left_text: Option<String>,
+    right_text: Option<String>,
+) -> DiffRow {
+    let (left_spans, right_spans) = match (&kind, &left_text, &right_text) {
+        (RowKind::Replace, Some(l), Some(r)) => {
+            let (ls, rs) = compute_inline_spans(l, r);
+            (Some(ls), Some(rs))
+        }
+        _ => (None, None),
+    };
+
+    DiffRow {
+        kind,
+        left_no,
+        right_no,
+        left_text,
+        right_text,
+        left_spans,
+        right_spans,
+    }
+}
+
 /// Build aligned side-by-side rows from two text buffers.
 pub fn compute_text_diff(left: &str, right: &str) -> (Vec<DiffRow>, DiffStats, Vec<usize>) {
     let left_lines = split_lines(left);
@@ -115,13 +225,13 @@ pub fn compute_text_diff(left: &str, right: &str) -> (Vec<DiffRow>, DiffStats, V
                 len,
             } => {
                 for i in 0..len {
-                    rows.push(DiffRow {
-                        kind: RowKind::Equal,
-                        left_no: Some((old_index + i + 1) as u32),
-                        right_no: Some((new_index + i + 1) as u32),
-                        left_text: Some(left_owned[old_index + i].clone()),
-                        right_text: Some(right_owned[new_index + i].clone()),
-                    });
+                    rows.push(row(
+                        RowKind::Equal,
+                        Some((old_index + i + 1) as u32),
+                        Some((new_index + i + 1) as u32),
+                        Some(left_owned[old_index + i].clone()),
+                        Some(right_owned[new_index + i].clone()),
+                    ));
                     stats.equal += 1;
                 }
             }
@@ -132,13 +242,13 @@ pub fn compute_text_diff(left: &str, right: &str) -> (Vec<DiffRow>, DiffStats, V
             } => {
                 for i in 0..old_len {
                     change_indices.push(rows.len());
-                    rows.push(DiffRow {
-                        kind: RowKind::Delete,
-                        left_no: Some((old_index + i + 1) as u32),
-                        right_no: None,
-                        left_text: Some(left_owned[old_index + i].clone()),
-                        right_text: None,
-                    });
+                    rows.push(row(
+                        RowKind::Delete,
+                        Some((old_index + i + 1) as u32),
+                        None,
+                        Some(left_owned[old_index + i].clone()),
+                        None,
+                    ));
                     stats.delete += 1;
                 }
             }
@@ -149,13 +259,13 @@ pub fn compute_text_diff(left: &str, right: &str) -> (Vec<DiffRow>, DiffStats, V
             } => {
                 for i in 0..new_len {
                     change_indices.push(rows.len());
-                    rows.push(DiffRow {
-                        kind: RowKind::Insert,
-                        left_no: None,
-                        right_no: Some((new_index + i + 1) as u32),
-                        left_text: None,
-                        right_text: Some(right_owned[new_index + i].clone()),
-                    });
+                    rows.push(row(
+                        RowKind::Insert,
+                        None,
+                        Some((new_index + i + 1) as u32),
+                        None,
+                        Some(right_owned[new_index + i].clone()),
+                    ));
                     stats.insert += 1;
                 }
             }
@@ -196,13 +306,7 @@ pub fn compute_text_diff(left: &str, right: &str) -> (Vec<DiffRow>, DiffStats, V
                     };
 
                     change_indices.push(rows.len());
-                    rows.push(DiffRow {
-                        kind,
-                        left_no,
-                        right_no,
-                        left_text: left,
-                        right_text: right,
-                    });
+                    rows.push(row(kind, left_no, right_no, left, right));
 
                     match kind {
                         RowKind::Replace => stats.replace += 1,
@@ -328,6 +432,34 @@ mod tests {
         assert!(rows.iter().any(|r| {
             matches!(r.kind, RowKind::Replace | RowKind::Delete | RowKind::Insert)
         }));
+    }
+
+    #[test]
+    fn inline_highlights_within_line() {
+        let (rows, stats, _) =
+            compute_text_diff("alpha beta gamma\n", "alpha BETA gamma\n");
+        assert_eq!(stats.replace, 1);
+        let row = rows.iter().find(|r| r.kind == RowKind::Replace).unwrap();
+        let left = row.left_spans.as_ref().expect("left spans");
+        let right = row.right_spans.as_ref().expect("right spans");
+        assert!(left.iter().any(|s| s.changed && s.text.contains("beta")));
+        assert!(right.iter().any(|s| s.changed && s.text.contains("BETA")));
+        assert!(left.iter().any(|s| !s.changed && s.text.contains("alpha")));
+        assert!(right.iter().any(|s| !s.changed && s.text.contains("gamma")));
+    }
+
+    #[test]
+    fn inline_char_level_without_spaces() {
+        let (rows, _, _) = compute_text_diff("hello\n", "hallo\n");
+        let row = rows.iter().find(|r| r.kind == RowKind::Replace).unwrap();
+        let left = row.left_spans.as_ref().unwrap();
+        let right = row.right_spans.as_ref().unwrap();
+        assert!(left.iter().any(|s| s.changed));
+        assert!(right.iter().any(|s| s.changed));
+        let left_joined: String = left.iter().map(|s| s.text.as_str()).collect();
+        let right_joined: String = right.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(left_joined, "hello");
+        assert_eq!(right_joined, "hallo");
     }
 
     #[test]
