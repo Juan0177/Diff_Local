@@ -8,8 +8,13 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml"
+    "tauri:build": "tauri build",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "release:tag": "bash scripts/tag-release.sh",
+    "release:dispatch": "bash scripts/tag-release.sh --dispatch",
+    "release:download": "bash scripts/download-exe.sh"
   },
+
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.12",
     "@tauri-apps/api": "^2",
