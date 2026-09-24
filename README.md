@@ -14,7 +14,7 @@ Stack: **Tauri 2** + **React** + **TypeScript**. Il motore di diff (Myers, crate
 
 ## Prerequisiti
 
-- [Node.js](https://nodejs.org/) 18+
+- [Node.js](https://nodejs.org/) 20+ (consigliato 20.19+ o 22 LTS)
 - [Rust](https://www.rust-lang.org/tools/install) (stable, consigliato ≥ 1.85)
 - Dipendenze di sistema Tauri per il tuo OS: [prerequisites](https://tauri.app/start/prerequisites/)
 

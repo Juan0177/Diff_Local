@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -69,27 +71,30 @@ jobs:
 
       - name: Publish to binaries branch
         shell: bash
+        env:
+          VERSION: ${{ env.version }}
         run: |
           set -euo pipefail
-          VERSION="${{ env.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           WORKTREE="$(mktemp -d)"
-          if git fetch origin binaries:binaries 2>/dev/null; then
-            git worktree add "$WORKTREE" binaries
+          if git fetch origin binaries 2>/dev/null && git rev-parse --verify origin/binaries >/dev/null 2>&1; then
+            git worktree add "$WORKTREE" origin/binaries
+            cd "$WORKTREE"
+            git checkout -B binaries
           else
             git worktree add --detach "$WORKTREE"
-            (
-              cd "$WORKTREE"
-              git checkout --orphan binaries
-              git rm -rf . >/dev/null 2>&1 || true
-            )
+            cd "$WORKTREE"
+            git checkout --orphan binaries
+            git rm -rf . >/dev/null 2>&1 || true
           fi
 
-          mkdir -p "$WORKTREE/windows"
-          cp -v staged/* "$WORKTREE/windows/"
-          cat > "$WORKTREE/README.md" <<EOF
+          mkdir -p windows
+          cp -v "$GITHUB_WORKSPACE"/staged/* windows/
+
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          cat > README.md <<EOF
           # Diff_Local binaries
 
           Build automatica da GitHub Actions (tag / workflow_dispatch).
@@ -99,23 +104,15 @@ jobs:
           - \`windows/Diff_Local_${VERSION}_x64-setup.exe\` — installer NSIS (consigliato)
           - \`windows/Diff_Local.exe\` — eseguibile (richiede WebView2 sul PC)
 
-          Versione: **${VERSION}**  
-          Commit sorgente: \`${GITHUB_SHA}\`
+          Versione: **${VERSION}**
+          Commit sorgente: \`${SHORT_SHA}\`
           EOF
-          # Fix indentation in README (heredoc above had leading spaces from yaml-ish paste)
-          sed -i 's/^[[:space:]]\{10\}//' "$WORKTREE/README.md" 2>/dev/null || \
-            python3 - <<PY
-          from pathlib import Path
-          p = Path("$WORKTREE/README.md")
-          lines = [ln[10:] if ln.startswith("          ") else ln for ln in p.read_text().splitlines()]
-          p.write_text("\n".join(lines) + "\n")
-          PY
+          python3 -c "from pathlib import Path; p=Path('README.md'); p.write_text('\n'.join(l[10:] if l.startswith('          ') else l for l in p.read_text().splitlines())+'\n')"
 
-          cd "$WORKTREE"
           git add -A
           if git diff --cached --quiet; then
             echo "Nessun cambiamento da pubblicare"
           else
-            git commit -m "chore: publish Windows binaries v${VERSION} (${GITHUB_SHA::7})"
-            git push -u origin binaries
+            git commit -m "chore: publish Windows binaries v${VERSION} (${SHORT_SHA})"
+            git push -u origin HEAD:binaries
           fi
