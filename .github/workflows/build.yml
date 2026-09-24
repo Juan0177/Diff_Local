@@ -1,0 +1,98 @@
+# Build di verifica: carica gli artifact (incluso l'exe Windows) senza creare una release.
+# Scaricali da Actions → run → Artifacts.
+
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+      - "cursor/**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            name: windows-x64
+            args: ""
+          - platform: ubuntu-22.04
+            name: linux-x64
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    name: build-${{ matrix.name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev \
+            xdg-utils
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Tauri app
+        run: npm run tauri build -- ${{ matrix.args }}
+
+      - name: Collect Windows artifacts
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Get-ChildItem -Path src-tauri/target/release/bundle -Recurse -Include *.exe,*.msi |
+            Copy-Item -Destination artifacts -Force
+          if (Test-Path src-tauri/target/release/Diff_Local.exe) {
+            Copy-Item src-tauri/target/release/Diff_Local.exe artifacts/Diff_Local.exe -Force
+          }
+          Get-ChildItem artifacts
+
+      - name: Collect Linux artifacts
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          mkdir -p artifacts
+          find src-tauri/target/release/bundle -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) \
+            -exec cp -v {} artifacts/ \;
+          if [ -f src-tauri/target/release/diff-local ]; then
+            cp -v src-tauri/target/release/diff-local artifacts/diff-local
+          fi
+          ls -lah artifacts
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Diff_Local-${{ matrix.name }}
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 30

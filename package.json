@@ -3,12 +3,19 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml"
+    "tauri:build": "tauri build",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "release:tag": "bash scripts/tag-release.sh",
+    "release:dispatch": "bash scripts/tag-release.sh --dispatch",
+    "release:download": "bash scripts/download-exe.sh"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.12",
@@ -20,11 +27,11 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
-    "@types/node": "^24.5.2",
+    "@types/node": "^22.13.10",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
-    "@vitejs/plugin-react": "^6.0.2",
-    "typescript": "~6.0.3",
-    "vite": "^8.0.16"
+    "@vitejs/plugin-react": "^4.5.2",
+    "typescript": "~5.8.3",
+    "vite": "^6.4.1"
   }
 }

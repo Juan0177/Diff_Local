@@ -1,0 +1,118 @@
+# Compila l'exe Windows e lo committa sul branch `binaries` (asset nel repo Git).
+#
+# Trigger: manuale, oppure dopo un tag v*.
+# Il binario non va su main: resta isolato su `binaries` per non gonfiare lo storico del codice.
+
+name: Publish binaries branch
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows-exe:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Tauri (NSIS + exe)
+        run: npm run tauri build
+
+      - name: Stage binaries
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path staged | Out-Null
+          $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          "version=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          $nsis = Get-ChildItem -Path src-tauri/target/release/bundle/nsis -Filter *-setup.exe -ErrorAction SilentlyContinue
+          if ($nsis) {
+            Copy-Item $nsis[0].FullName "staged/Diff_Local_${version}_x64-setup.exe"
+          }
+
+          $msi = Get-ChildItem -Path src-tauri/target/release/bundle/msi -Filter *.msi -ErrorAction SilentlyContinue
+          if ($msi) {
+            Copy-Item $msi[0].FullName "staged/Diff_Local_${version}_x64.msi"
+          }
+
+          if (Test-Path src-tauri/target/release/Diff_Local.exe) {
+            Copy-Item src-tauri/target/release/Diff_Local.exe "staged/Diff_Local.exe"
+          }
+
+          Get-ChildItem staged
+          if (-not (Get-ChildItem staged -ErrorAction SilentlyContinue)) {
+            throw "Nessun artifact Windows trovato"
+          }
+
+      - name: Publish to binaries branch
+        shell: bash
+        env:
+          VERSION: ${{ env.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          WORKTREE="$(mktemp -d)"
+          if git fetch origin binaries 2>/dev/null && git rev-parse --verify origin/binaries >/dev/null 2>&1; then
+            git worktree add "$WORKTREE" origin/binaries
+            cd "$WORKTREE"
+            git checkout -B binaries
+          else
+            git worktree add --detach "$WORKTREE"
+            cd "$WORKTREE"
+            git checkout --orphan binaries
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+
+          mkdir -p windows
+          cp -v "$GITHUB_WORKSPACE"/staged/* windows/
+
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          cat > README.md <<EOF
+          # Diff_Local binaries
+
+          Build automatica da GitHub Actions (tag / workflow_dispatch).
+
+          ## Windows
+
+          - \`windows/Diff_Local_${VERSION}_x64-setup.exe\` — installer NSIS (consigliato)
+          - \`windows/Diff_Local.exe\` — eseguibile (richiede WebView2 sul PC)
+
+          Versione: **${VERSION}**
+          Commit sorgente: \`${SHORT_SHA}\`
+          EOF
+          python3 -c "from pathlib import Path; p=Path('README.md'); p.write_text('\n'.join(l[10:] if l.startswith('          ') else l for l in p.read_text().splitlines())+'\n')"
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nessun cambiamento da pubblicare"
+          else
+            git commit -m "chore: publish Windows binaries v${VERSION} (${SHORT_SHA})"
+            git push -u origin HEAD:binaries
+          fi

@@ -14,7 +14,7 @@ Stack: **Tauri 2** + **React** + **TypeScript**. Il motore di diff (Myers, crate
 
 ## Prerequisiti
 
-- [Node.js](https://nodejs.org/) 18+
+- [Node.js](https://nodejs.org/) 20+ (consigliato 20.19+ o 22 LTS)
 - [Rust](https://www.rust-lang.org/tools/install) (stable, consigliato ≥ 1.85)
 - Dipendenze di sistema Tauri per il tuo OS: [prerequisites](https://tauri.app/start/prerequisites/)
 
@@ -31,16 +31,59 @@ npm install
 npm run tauri dev
 ```
 
-## Build di produzione
+## Build di produzione (locale)
+
+Sullo stesso OS della macchina:
 
 ```bash
-npm run tauri build
+npm ci
+npm run tauri:build
+# oppure
+./scripts/build-local.sh
 ```
 
-Il frontend può essere compilato da solo con:
+Su **Windows** ottieni:
+- `src-tauri/target/release/Diff_Local.exe`
+- installer NSIS `src-tauri/target/release/bundle/nsis/*-setup.exe`
+
+Il frontend da solo: `npm run build`.
+
+## Scaricare / pubblicare l'exe da GitHub
+
+L'exe Windows **non** viene committato nel tree (è troppo grande): viene prodotto da GitHub Actions e pubblicato nelle **Releases** / **Artifacts**.
+
+### Build automatica (ogni push)
+
+Il workflow [`.github/workflows/build.yml`](.github/workflows/build.yml) compila Windows + Linux e carica gli artifact.
+
+1. Apri **Actions → Build** (o aspetta il run sul push)
+2. Apri il run → **Artifacts** → `Diff_Local-windows-x64`
+3. Oppure da CLI: `npm run release:download`
+
+### Pubblicare una release con l'exe
 
 ```bash
-npm run build
+# bump versione (opzionale), commit, tag vX.Y.Z e push → avvia Release
+./scripts/tag-release.sh 0.1.0
+
+# oppure avvia solo il workflow senza nuovo tag
+npm run release:dispatch
+```
+
+Il workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) crea una GitHub Release con `Diff_Local_*_x64-setup.exe` (e gli altri OS).
+
+> In **Settings → Actions → General → Workflow permissions** abilita *Read and write permissions* (serve a `tauri-action` per creare la release).
+
+### Branch `binaries` (exe dentro Git)
+
+Il workflow [`.github/workflows/publish-binaries.yml`](.github/workflows/publish-binaries.yml) committa l'installer sul branch dedicato `binaries` (non su `main`):
+
+```bash
+gh workflow run publish-binaries.yml
+# oppure dopo un tag v*
+git fetch origin binaries
+git checkout binaries
+ls windows/
 ```
 
 ## Test
